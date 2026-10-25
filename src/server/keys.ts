@@ -54,7 +54,6 @@ import {
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
 import { chatGPTConnected } from "../agent/chatgpt-bridge.ts";
-import { readEndpoint } from "../store/endpoint.ts";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
 // module; the snapshot must not re-run and misread fill-gapped vars as real
@@ -85,12 +84,12 @@ export function isWritableAuthKey(id: string): boolean {
  *  in core/auth-keys.ts and tests/auth-provider-keys.test.ts). Sorted by
  *  id for a stable payload. */
 export function providerKeyList() {
-	// The custom endpoint joins the roster too (fork addition): its key is
-	// writable through the same seam, so it must also be shape-provable —
-	// but it is only OFFERED once an endpoint URL is saved (a key alone
-	// configures nothing). providerKeyPresent's absent-provider rule would
-	// otherwise let the Add dropdown mint a key with no URL behind it.
-	return [...AUTH_PROVIDER_KEYS, ...(readEndpoint().baseUrl ? [CUSTOM_PROVIDER_KEY] : [])].sort((a, b) => a.id.localeCompare(b.id));
+	// The custom endpoint is ALWAYS offered (fork addition): it is the
+	// discovery surface for the user's own router, so first-run must be able
+	// to pick it. The Settings > Providers section supplies the URL beside
+	// the key; the setup dialog routes a bare key to the endpoint route
+	// (which refuses a key without a URL) rather than minting one blind.
+	return [...AUTH_PROVIDER_KEYS, CUSTOM_PROVIDER_KEY].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The fresh-user switch (owner, interlude 2026-09-22): env keys are

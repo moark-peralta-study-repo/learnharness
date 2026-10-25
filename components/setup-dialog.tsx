@@ -45,6 +45,7 @@ import { Hint } from "@/components/ui/hint";
 import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { ChatGPTBackgroundAccess, ChatGPTConnection } from "@/components/settings/chatgpt-connection";
+import { CUSTOM_PROVIDER_ID } from "@/src/core";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -127,6 +128,9 @@ export function SetupKeysBody({
 	onPick,
 	onValue,
 	onSave,
+	endpointUrl,
+	onEndpointUrl,
+	custom,
 	menuAnchor,
 }: {
 	/** The full provider roster (GET /api/keys providers) — undefined
@@ -143,6 +147,12 @@ export function SetupKeysBody({
 	onPick: (p: ProviderKeyInfo) => void;
 	onValue: (v: string) => void;
 	onSave: () => void;
+	/** The custom endpoint's base URL (fork addition) — only rendered for
+	 *  the `custom` provider, whose key alone configures nothing. */
+	endpointUrl: string;
+	onEndpointUrl: (v: string) => void;
+	/** The chosen provider is the custom endpoint. */
+	custom: boolean;
 	/** The MenuShell anchor — wired by the wrapper (its triggerRef). */
 	menuAnchor: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -178,6 +188,19 @@ export function SetupKeysBody({
 						</MenuShell>
 					)}
 				</div>
+				{custom && (
+					<input
+						type="url"
+						value={endpointUrl}
+						onChange={(e) => onEndpointUrl(e.target.value)}
+						placeholder="https://your-router.example.com/v1"
+						aria-label="Custom endpoint base URL"
+						data-testid="setup-endpoint-url"
+						disabled={saving}
+						spellCheck={false}
+						className="h-7 max-w-96 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+					/>
+				)}
 				{provider && (
 					<div className="flex max-w-96 items-center gap-2">
 						<input
@@ -185,7 +208,7 @@ export function SetupKeysBody({
 							value={value}
 							onChange={(e) => onValue(e.target.value)}
 							onKeyDown={(e) => {
-								if (e.key === "Enter" && value.trim()) onSave();
+								if (e.key === "Enter" && value.trim() && (!custom || endpointUrl.trim())) onSave();
 							}}
 							placeholder="Paste key…"
 							aria-label={`${provider.label} key`}
@@ -197,7 +220,7 @@ export function SetupKeysBody({
 						<button
 							type="button"
 							onClick={onSave}
-							disabled={saving || !value.trim()}
+							disabled={saving || !value.trim() || (custom && !endpointUrl.trim())}
 							data-testid="setup-key-save"
 							className="shrink-0 rounded-sm border border-border bg-background px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
 						>
@@ -243,6 +266,9 @@ export function SetupDialog({
 	// see the trigger testid branch below).
 	const [keyProviders, setKeyProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
 	const [keyProvider, setKeyProvider] = useState<ProviderKeyInfo | null>(null);
+	/** The custom endpoint's URL (fork addition): its key alone saves
+	 *  nothing useful — the endpoint route needs URL + key together. */
+	const [endpointUrl, setEndpointUrl] = useState("");
 	const [keyValue, setKeyValue] = useState("");
 	const [keySaving, setKeySaving] = useState(false);
 	const [keyError, setKeyError] = useState<string | null>(null);
@@ -353,12 +379,18 @@ export function SetupDialog({
 	 *  the whole way. Shape-gate 400s keep their user-facing line inline. */
 	async function saveKey() {
 		if (!keyProvider || !keyValue.trim() || keySaving) return;
+		const isCustom = keyProvider.id === CUSTOM_PROVIDER_ID;
+		if (isCustom && !endpointUrl.trim()) return;
 		setKeySaving(true);
 		setKeyError(null);
-		const res = await fetch(`/api/keys/${encodeURIComponent(keyProvider.envVar)}`, {
+		// The custom endpoint saves through its OWN route (fork addition):
+		// URL + key together, which VERIFIES the endpoint and federates its
+		// models. A bare key here would leave the provider empty and the
+		// flow would bounce straight back to this stage.
+		const res = await fetch(isCustom ? "/api/custom-endpoint" : `/api/keys/${encodeURIComponent(keyProvider.envVar)}`, {
 			method: "PUT",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ value: keyValue }),
+			body: JSON.stringify(isCustom ? { baseUrl: endpointUrl, apiKey: keyValue } : { value: keyValue }),
 		}).catch(() => null);
 		setKeySaving(false);
 		if (!res || !res.ok) {
@@ -368,6 +400,7 @@ export function SetupDialog({
 		}
 		setKeyProvider(null);
 		setKeyValue("");
+		setEndpointUrl("");
 		notifySettingsSaved("keys");
 	}
 
@@ -449,6 +482,9 @@ export function SetupDialog({
 								}}
 								onValue={setKeyValue}
 								onSave={() => void saveKey()}
+								custom={keyProvider?.id === CUSTOM_PROVIDER_ID}
+								endpointUrl={endpointUrl}
+								onEndpointUrl={setEndpointUrl}
 							/>
 						)}
 					</div>

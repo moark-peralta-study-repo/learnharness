@@ -76,3 +76,8 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// The custom OpenAI-compatible endpoint's provider id + key var (fork
+// addition). The id is part of the /api/models and /api/keys contracts and
+// the key var is what the keys seam stores, so both are pure core facts —
+// components and the agent layer resolve one definition, not a copy.
+export * from "./custom-endpoint.ts";

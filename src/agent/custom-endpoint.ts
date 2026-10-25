@@ -30,11 +30,12 @@
 
 import path from "node:path";
 import { PATHS } from "../../config.ts";
+import { CUSTOM_PROVIDER_ID, CUSTOM_PROVIDER_LABEL, CUSTOM_ENDPOINT_KEY_VAR } from "../core/custom-endpoint.ts";
 
-export const CUSTOM_PROVIDER_ID = "custom";
-export const CUSTOM_PROVIDER_LABEL = "Custom endpoint";
-/** The key rides the keys seam under this fixed name. */
-export const CUSTOM_ENDPOINT_KEY_VAR = "CUSTOM_ENDPOINT_API_KEY";
+// The identity constants are pure core (they are re-exported here so this
+// module's consumers keep a single import site); only the URL/store shapes
+// below belong to the agent layer.
+export { CUSTOM_PROVIDER_ID, CUSTOM_PROVIDER_LABEL, CUSTOM_ENDPOINT_KEY_VAR };
 export const CUSTOM_ENDPOINT_FILE = path.join(PATHS.data, "endpoint.json");
 
 /** One discovered model, as stored. */

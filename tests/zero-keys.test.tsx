@@ -69,6 +69,9 @@ describe("SetupKeysBody — stage 1's self-contained first-key screen", () => {
 		onPick: () => {},
 		onValue: () => {},
 		onSave: () => {},
+		endpointUrl: "",
+		onEndpointUrl: () => {},
+		custom: false,
 		menuAnchor: { current: null },
 	};
 
@@ -83,6 +86,21 @@ describe("SetupKeysBody — stage 1's self-contained first-key screen", () => {
 		assert.ok(html.includes('data-testid="setup-key-provider"'));
 		assert.ok(html.includes("Pick a provider…"));
 		assert.ok(!html.includes('data-testid="setup-key-input"'), "no paste field before a provider is picked");
+	});
+
+	it("the custom endpoint also asks for its base URL (fork addition)", () => {
+		const custom = { id: "custom", envVar: "CUSTOM_ENDPOINT_API_KEY", label: "Custom endpoint" };
+		const withUrl = renderToStaticMarkup(
+			createElement(SetupKeysBody, { ...base, providers: [...PROVIDERS, custom], provider: custom, custom: true }),
+		);
+		assert.ok(withUrl.includes('data-testid="setup-endpoint-url"'), "a bare key cannot configure an endpoint");
+		// Save stays disabled until BOTH the URL and the key landed.
+		assert.match(withUrl, /data-testid="setup-key-save"[^>]*disabled/);
+		// A normal provider never grows the field.
+		const plain = renderToStaticMarkup(
+			createElement(SetupKeysBody, { ...base, providers: PROVIDERS, provider: PROVIDERS[0]! }),
+		);
+		assert.ok(!plain.includes('data-testid="setup-endpoint-url"'));
 	});
 
 	it("after a pick: the paste input + Save join", () => {
