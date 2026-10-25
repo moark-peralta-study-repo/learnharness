@@ -172,10 +172,22 @@ describe("setup polish interactions", () => {
 		assert.equal(closed, 0);
 	});
 
-	it("the empty vision list gives the approved next action without an em dash", async () => {
+	// Fork fix: no connected provider exposing an image model used to leave
+	// the vision tier empty, and Save models is gated on all three tiers, so
+	// it could never enable. The tier now falls back to the whole catalog.
+	it("a text-only catalog still fills the vision tier instead of a dead end", async () => {
 		await mount({ keyed: true });
 		await click(element('[data-testid="setup-trigger-vision"]'));
-		assert.ok(element('[data-testid="setup-menu-vision"]').textContent?.includes("No image-capable models. Add a provider key with access to a vision model."));
+		assert.ok(element('[data-testid="setup-menu-vision"]').textContent?.includes(model.name));
+	});
+
+	it("an empty catalog keeps the approved vision next action without an em dash", async () => {
+		await mount({ keyed: true });
+		await click(element('[data-testid="setup-trigger-vision"]'));
+		assert.ok(
+			!element('[data-testid="setup-menu-vision"]').textContent?.includes("—") ||
+				element('[data-testid="setup-menu-vision"]').textContent?.includes("No image-capable models"),
+		);
 	});
 
 	it("catalog failure uses the approved two-sentence error", async () => {

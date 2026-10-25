@@ -55,14 +55,22 @@ describe("parseModelList", () => {
 		assert.equal(parseModelList({ data: [{ id: "default" }] })[0]!.reasoning, undefined);
 	});
 
-	it("keeps advertised context window and vision, never invents them", () => {
+	it("keeps an advertised context window, never invents one", () => {
 		const [withMeta] = parseModelList({ data: [{ id: "v", context_length: 32000, modalities: { input: ["text", "image"] } }] });
 		assert.equal(withMeta!.contextWindow, 32000);
-		assert.equal(withMeta!.vision, true);
 		const [plain] = parseModelList({ data: [{ id: "p" }] });
 		assert.equal(plain!.contextWindow, undefined);
-		assert.equal(plain!.vision, undefined);
 		assert.equal(plain!.name, "p");
+	});
+
+	// Fork fix: an OpenAI /models row carries no modality field (llmrouter
+	// answers only id/object/created/owned_by). A discovery-only vision flag
+	// left every endpoint model non-image-capable, so the setup dialog's
+	// vision tier listed nothing and Save models stayed greyed forever.
+	it("treats absent modalities as image-capable, honours a declared opt-out", () => {
+		assert.equal(parseModelList({ data: [{ id: "bare" }] })[0]!.vision, undefined);
+		assert.equal(parseModelList({ data: [{ id: "img", modalities: { input: ["text", "image"] } }] })[0]!.vision, undefined);
+		assert.equal(parseModelList({ data: [{ id: "txt", modalities: { input: ["text"] } }] })[0]!.vision, false);
 	});
 
 	it("garbage in, empty list out", () => {

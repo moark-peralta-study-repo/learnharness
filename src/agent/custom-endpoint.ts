@@ -46,7 +46,12 @@ export interface CustomModel {
 	 *  `max_model_len`, `max_input_tokens`); undefined = unknown → the
 	 *  catalog reports 0 (usage-only context meter, pi's honest default). */
 	contextWindow?: number;
-	/** Vision input (declared `modalities.input` containing "image"). */
+	/** Vision input. DEFAULT TRUE, mirroring `reasoning` (fork fix): the
+	 *  OpenAI /models shape carries no modality field at all — llmrouter
+	 *  answers `{id,object,created,owned_by}` — so a discovery-only flag made
+	 *  EVERY endpoint model non-image-capable and the setup dialog's vision
+	 *  tier listed nothing, leaving "Save models" permanently greyed. Only
+	 *  an explicit `modalities.input` WITHOUT "image" opts a model out. */
 	vision?: boolean;
 	/** Reasoning model. DEFAULT TRUE for endpoint models: most routers front
 	 *  reasoning models and advertise nothing (llmrouter exposes only `id`),
@@ -140,11 +145,13 @@ export function parseModelList(payload: unknown): CustomModel[] {
 			(raw as { limits?: Record<string, unknown> }).limits?.context,
 		].find((v): v is number => typeof v === "number" && v > 0);
 		const modalities = (raw as { modalities?: { input?: unknown[] } }).modalities?.input;
-		const vision = Array.isArray(modalities) && modalities.includes("image");
+		// Absent = vision-capable (see CustomModel.vision); a declared input
+		// list that omits "image" opts out.
+		const notVision = Array.isArray(modalities) && !modalities.includes("image");
 		// Absent = reasoning-capable (the router defaults above); only an
 		// explicit false opts out.
 		const notReasoning = raw.reasoning === false;
-		models.push({ id, name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : id, ...(contextWindow ? { contextWindow } : {}), ...(vision ? { vision } : {}), ...(notReasoning ? { reasoning: false } : {}) });
+		models.push({ id, name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : id, ...(contextWindow ? { contextWindow } : {}), ...(notVision ? { vision: false } : {}), ...(notReasoning ? { reasoning: false } : {}) });
 	}
 	return models.sort((a, b) => a.id.localeCompare(b.id));
 }

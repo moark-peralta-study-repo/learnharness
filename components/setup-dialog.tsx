@@ -383,6 +383,13 @@ export function SetupDialog({
 
 	const stage = failed ? "keys" : setupStage(body ? body.providers : null);
 	const allPicked = SLOT_ORDER.every((s) => picked[s]);
+	// Vision tier fallback (fork fix): when the connected providers expose no
+	// image-capable model at all — an unnamed router model, a text-only
+	// endpoint — the vision tier offers the whole catalog instead of an empty
+	// list that leaves "Save models" greyed out forever. Chats through a
+	// non-image model still work; the tier is only a default.
+	const visionModels = body ? body.models.filter((m) => m.input.includes("image")) : [];
+	const visionCatalog = visionModels.length > 0 ? visionModels : body?.models;
 
 	/** Stage 1's save: PUT the pasted key, dispatch the keys signal, and
 	 *  CLEAN the local screen — the signal re-fetch widens the catalog and
@@ -517,7 +524,7 @@ export function SetupDialog({
 							const level = levels[slot];
 							const levelsForEntry = entry?.supportedLevels ?? [];
 							const catalog =
-								slot === "vision" ? body?.models.filter((m) => m.input.includes("image")) : body?.models;
+								slot === "vision" ? visionCatalog : body?.models;
 							return (
 								<div key={slot} data-testid={`setup-slot-${slot}`} className="flex flex-col gap-1.5">
 									<span className="flex items-center gap-1.5">

@@ -81,6 +81,9 @@ export function piModels() {
  * meter, no reasoning levels, zero cost) and the endpoint's own declared
  * context window when it advertises one.
  */
+/** Placeholder context window for endpoint models that advertise none. */
+const UNKNOWN_ENDPOINT_CONTEXT = 128_000;
+
 function customProvider() {
 	const endpoint = currentEndpoint();
 	return createProvider({
@@ -103,7 +106,12 @@ function customProvider() {
 					// the pi-side maps that differ per real provider, and a
 					// wrong map silently sends an unsupported effort.
 					reasoning: m.reasoning !== false,
-					contextWindow: m.contextWindow ?? 0,
+					// Unadvertised window gets a usable PLACEHOLDER (fork fix):
+					// 0 behaves like "no context at all" in the catalog and
+					// read as a broken model ("auto 0"). The endpoint does not
+					// enforce this number, so a generous default is safe; a
+					// declared window always wins.
+					contextWindow: m.contextWindow ?? UNKNOWN_ENDPOINT_CONTEXT,
 					maxTokens: Math.min(m.contextWindow ?? 8192, 8192),
 				}))
 			: [],
