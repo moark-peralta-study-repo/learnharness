@@ -4,7 +4,7 @@
  * no network, no LLM.
  */
 import assert from "node:assert/strict";
-import { describe, it, beforeEach } from "node:test";
+import { after, beforeEach, describe, it } from "node:test";
 import {
 	CUSTOM_PROVIDER_ID,
 	EMPTY_ENDPOINT,
@@ -82,7 +82,14 @@ describe("parseModelList", () => {
 });
 
 describe("the endpoint store", () => {
+	// The store writes data/endpoint.json, which sibling suites read as the
+	// resolved truth (a configured endpoint opens chat-flow's turn gate).
+	// Put the empty record back so this suite cannot leak one into them.
 	beforeEach(() => setCurrentEndpoint(EMPTY_ENDPOINT));
+	after(async () => {
+		const store = await import("../src/store/endpoint.ts");
+		await store.writeEndpoint(EMPTY_ENDPOINT);
+	});
 
 	it("saves overrides and drops them for models that are gone", async () => {
 		const store = await import("../src/store/endpoint.ts");

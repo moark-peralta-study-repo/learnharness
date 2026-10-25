@@ -27,6 +27,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { createTeacherAgent } from "../src/agent/teacher-agent.ts";
 import { createTeacherTools } from "../src/agent/tools.ts";
+import { piModels } from "../src/agent/models.ts";
 import { handleChatInput, handleChatRequest } from "../src/server/chat-handler.ts";
 import { effectiveSettings } from "../src/server/stores.ts";
 import { isTurnRunning } from "../src/server/turn-liveness.ts";
@@ -927,7 +928,7 @@ describe("renameChat (the header's click-to-edit title)", () => {
 });
 
 describe("the BYOK turn gate (no factory floor — owner, 2026-09-22)", () => {
-	it("a chat with no model refuses the turn with the 503 envelope — nothing lingers", async () => {
+	it("a chat with no model refuses the turn with the 503 envelope — nothing lingers (or a configured endpoint answers)", async () => {
 		const chat = chatStore.createChat("Test: unconfigured chat");
 		createdChats.push(chat.id);
 
@@ -935,16 +936,31 @@ describe("the BYOK turn gate (no factory floor — owner, 2026-09-22)", () => {
 		// one-fs-owner policy) — READ the resolved truth, never write it.
 		// Refusal holds when the chain is empty; a record-carried strong
 		// slot legitimately opens the gate (the chain is honest both ways).
-		const expectRefusal = effectiveSettings().models.strong === null;
+		// A slot pinned to a CUSTOM endpoint only opens the gate while that
+		// endpoint still carries models: model resolution fails with its own
+		// 503 when the provider has none (another suite's endpoint.json may
+		// survive into this run). Branch on a USABLE model, not a pinned one.
+		const strong = effectiveSettings().models.strong;
+		const resolved = strong ? piModels().getModel(strong.provider, strong.id) : undefined;
+
+		const expectRefusal = strong === null || !resolved;
 
 		const res = await handleChatRequest(post(chat.id, { type: "text", text: "teach me the solar system" }), agentFactory(scriptedTeacher(defaultLesson).engine));
 
 		if (expectRefusal) {
+			// Two honest refusals, same status: no slot at all is the config
+			// gate; a slot pinned to a provider that no longer serves the id
+			// (a stale custom-endpoint pin) fails at model resolution. Both
+			// must leave nothing behind, which is what this test is for.
 			assert.equal(res.status, 503, "the universal turn gate refuses before beginTurn");
-			const body = (await res.json()) as { error: string; code: string; missing: string[] };
-			assert.equal(body.code, "models_not_configured");
-			assert.deepEqual(body.missing, ["strong"]);
-			assert.match(body.error, /No model configured/);
+			const body = (await res.json()) as { error: string; code?: string; missing?: string[] };
+			if (body.code) {
+				assert.equal(body.code, "models_not_configured");
+				assert.deepEqual(body.missing, ["strong"]);
+				assert.match(body.error, /No model configured/);
+			} else {
+				assert.match(body.error, /selected model is unavailable/i);
+			}
 		} else {
 			assert.equal(res.status, 200, "the record's strong slot satisfies the conversation chain");
 			await drainRunning(chat.id);
