@@ -47,6 +47,11 @@ export interface CustomModel {
 	contextWindow?: number;
 	/** Vision input (declared `modalities.input` containing "image"). */
 	vision?: boolean;
+	/** Reasoning model. DEFAULT TRUE for endpoint models: most routers front
+	 *  reasoning models and advertise nothing (llmrouter exposes only `id`),
+	 *  so opting IN is what keeps the thinking picker honest — an explicit
+	 *  `reasoning: false` in the payload opts one model back out. */
+	reasoning?: boolean;
 }
 
 /** The stored record. `baseUrl` empty = no endpoint configured. */
@@ -135,7 +140,10 @@ export function parseModelList(payload: unknown): CustomModel[] {
 		].find((v): v is number => typeof v === "number" && v > 0);
 		const modalities = (raw as { modalities?: { input?: unknown[] } }).modalities?.input;
 		const vision = Array.isArray(modalities) && modalities.includes("image");
-		models.push({ id, name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : id, ...(contextWindow ? { contextWindow } : {}), ...(vision ? { vision } : {}) });
+		// Absent = reasoning-capable (the router defaults above); only an
+		// explicit false opts out.
+		const notReasoning = raw.reasoning === false;
+		models.push({ id, name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : id, ...(contextWindow ? { contextWindow } : {}), ...(vision ? { vision } : {}), ...(notReasoning ? { reasoning: false } : {}) });
 	}
 	return models.sort((a, b) => a.id.localeCompare(b.id));
 }

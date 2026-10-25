@@ -97,7 +97,12 @@ function customProvider() {
 					baseUrl: endpoint.baseUrl,
 					input: (m.vision ? ["text", "image"] : ["text"]) as ("text" | "image")[],
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-					reasoning: false,
+					// Reasoning: a capable endpoint model gets every plain
+					// level (off..high) — the router/gateway adapts the effort
+					// field itself. xhigh/max stay OFF deliberately: they are
+					// the pi-side maps that differ per real provider, and a
+					// wrong map silently sends an unsupported effort.
+					reasoning: m.reasoning !== false,
 					contextWindow: m.contextWindow ?? 0,
 					maxTokens: Math.min(m.contextWindow ?? 8192, 8192),
 				}))

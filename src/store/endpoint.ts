@@ -26,6 +26,7 @@ function sanitize(raw: unknown): CustomEndpoint {
 						name: typeof m.name === "string" && m.name ? m.name : m.id,
 						...(typeof m.contextWindow === "number" && m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
 						...(m.vision === true ? { vision: true } : {}),
+						...(m.reasoning === false ? { reasoning: false } : {}),
 					},
 				];
 			})

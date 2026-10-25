@@ -16,6 +16,7 @@ import {
 	setCurrentEndpoint,
 } from "../src/agent/custom-endpoint.ts";
 import { piEngineForSpec, piModels } from "../src/agent/models.ts";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 
 describe("normalizeEndpointUrl", () => {
 	it("assumes /v1 on a bare origin", () => {
@@ -47,6 +48,11 @@ describe("parseModelList", () => {
 
 	it("accepts a bare array (some local servers)", () => {
 		assert.deepEqual(parseModelList([{ id: "only" }]).map((m) => m.id), ["only"]);
+	});
+
+	it("parks an explicit reasoning:false, leaving absence alone", () => {
+		assert.deepEqual(parseModelList({ data: [{ id: "plain", reasoning: false }] })[0]!.reasoning, false);
+		assert.equal(parseModelList({ data: [{ id: "default" }] })[0]!.reasoning, undefined);
 	});
 
 	it("keeps advertised context window and vision, never invents them", () => {
@@ -92,11 +98,27 @@ describe("the provider", () => {
 		assert.equal(model!.contextWindow, 4096);
 	});
 
+	it("endpoint models are reasoning by default (the thinking picker offers levels)", () => {
+		setCurrentEndpoint({ baseUrl: "https://gw.example.com/v1", models: [{ id: "m1", name: "M One" }], updatedAt: "" });
+		const engine = piEngineForSpec({ provider: CUSTOM_PROVIDER_ID, id: "m1", thinkingLevel: "high" });
+		assert.equal(engine.level, "high");
+		assert.ok(getSupportedThinkingLevels(engine.model).includes("high"));
+	});
+
+	it("an endpoint can opt a model back out of reasoning", () => {
+		setCurrentEndpoint({ baseUrl: "https://gw.example.com/v1", models: [{ id: "plain", name: "Plain", reasoning: false }], updatedAt: "" });
+		const engine = piEngineForSpec({ provider: CUSTOM_PROVIDER_ID, id: "plain" });
+		assert.deepEqual(getSupportedThinkingLevels(engine.model), ["off"]);
+	});
+
 	it("builds an engine for a custom model (the chat path)", () => {
 		setCurrentEndpoint({ baseUrl: "https://gw.example.com/v1", models: [{ id: "m1", name: "M One" }], updatedAt: "" });
 		const engine = piEngineForSpec({ provider: CUSTOM_PROVIDER_ID, id: "m1" });
 		assert.equal(engine.model.id, "m1");
-		assert.equal(engine.level, "off", "no reasoning levels → off");
+		// UNSET level on a reasoning-capable model takes the baked default
+		// order's first entry (medium) — not off, which used to make the
+		// picker look like it had nothing to offer.
+		assert.equal(engine.level, "medium");
 	});
 
 	it("an unknown id still throws honestly", () => {
