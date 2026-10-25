@@ -18,6 +18,7 @@ import { SettingsSection } from "./controls.tsx";
 interface EndpointView {
 	baseUrl: string;
 	models: { id: string; name: string }[];
+	contextWindows: Record<string, number>;
 	keyPresent: boolean;
 }
 
@@ -30,6 +31,11 @@ export function CustomEndpointSection() {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [saved, setSaved] = useState(false);
+	/** Draft per-model windows: a string while typing, so the field can be
+	 *  emptied; saved as numbers. */
+	const [windows, setWindows] = useState<Record<string, string>>({});
+	const [windowError, setWindowError] = useState<string | null>(null);
+	const [windowSaved, setWindowSaved] = useState<string | null>(null);
 
 	const load = useCallback(() => {
 		fetch("/api/custom-endpoint")
@@ -38,6 +44,7 @@ export function CustomEndpointSection() {
 				if (!b) return;
 				setView(b);
 				setUrl((current) => current || b.baseUrl);
+				setWindows(Object.fromEntries(b.models.map((m) => [m.id, b.contextWindows?.[m.id] ? String(b.contextWindows[m.id]) : ""])));
 			})
 			.catch(() => undefined);
 	}, []);
@@ -65,6 +72,34 @@ export function CustomEndpointSection() {
 			setError("could not reach the app server");
 		} finally {
 			setBusy(false);
+		}
+	}
+
+	/** Save ONE model's window (PATCH never re-runs discovery). */
+	async function saveWindow(id: string) {
+		setWindowError(null);
+		setWindowSaved(null);
+		const raw = windows[id] ?? "";
+		const contextWindows: Record<string, number | null> = {
+			// Merge the rest in so saving one row cannot clear the others.
+			...Object.fromEntries(Object.entries(windows).map(([k, v]) => [k, v.trim() ? Number(v) : null])),
+			[id]: raw.trim() ? Number(raw) : null,
+		};
+		try {
+			const res = await fetch("/api/custom-endpoint", {
+				method: "PATCH",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ contextWindows }),
+			});
+			const body = (await res.json().catch(() => ({}))) as { error?: string };
+			if (!res.ok) {
+				setWindowError(body.error ?? `request failed (${res.status})`);
+				return;
+			}
+			setWindowSaved(id);
+			load();
+		} catch {
+			setWindowError("could not reach the app server");
 		}
 	}
 
@@ -131,9 +166,45 @@ export function CustomEndpointSection() {
 			{error && <p data-testid="custom-endpoint-error" className="text-xs text-red-500">{error}</p>}
 			{saved && !error && <p className="text-xs text-muted-foreground">Connected — the models are in your pickers now.</p>}
 			{connected && (
-				<p data-testid="custom-endpoint-models" className="text-xs text-muted-foreground">
-					{view!.models.length} model{view!.models.length === 1 ? "" : "s"} available from this endpoint.
-				</p>
+				<>
+					<p data-testid="custom-endpoint-models" className="text-xs text-muted-foreground">
+						{view!.models.length} model{view!.models.length === 1 ? "" : "s"} available from this endpoint.
+					</p>
+					<div className="flex flex-col gap-1">
+						<span className="text-xs text-muted-foreground">
+							Context window per model — leave blank to use what the endpoint reports (or the app’s 128k default when it reports nothing).
+						</span>
+						{view!.models.map((model) => (
+							<div key={model.id} className="flex items-center gap-2">
+								<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{model.name}</span>
+								<input
+									className={`${INPUT} w-32`}
+									data-testid={`custom-endpoint-window-${model.id}`}
+									inputMode="numeric"
+									value={windows[model.id] ?? ""}
+									onChange={(e) => setWindows((prev) => ({ ...prev, [model.id]: e.target.value.replace(/[^0-9]/g, "") }))}
+									placeholder="128000"
+									disabled={busy}
+								/>
+								<button
+									type="button"
+									data-testid={`custom-endpoint-window-save-${model.id}`}
+									onClick={() => void saveWindow(model.id)}
+									disabled={busy || (windows[model.id] ?? "") === String(view!.contextWindows?.[model.id] ?? "")}
+									className="rounded border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-40"
+								>
+									Save
+								</button>
+								{windowSaved === model.id && <span className="text-xs text-muted-foreground">Saved</span>}
+							</div>
+						))}
+						{windowError && (
+							<p data-testid="custom-endpoint-window-error" className="text-xs text-red-500">
+								{windowError}
+							</p>
+						)}
+					</div>
+				</>
 			)}
 		</SettingsSection>
 	);

@@ -9,7 +9,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { CUSTOM_ENDPOINT_FILE, EMPTY_ENDPOINT, setCurrentEndpoint, type CustomEndpoint, type CustomModel } from "../agent/custom-endpoint.ts";
+import { CUSTOM_ENDPOINT_FILE, EMPTY_ENDPOINT, sanitizeOverrides, setCurrentEndpoint, type CustomEndpoint, type CustomModel } from "../agent/custom-endpoint.ts";
 
 function sanitize(raw: unknown): CustomEndpoint {
 	if (typeof raw !== "object" || raw === null) return EMPTY_ENDPOINT;
@@ -31,7 +31,17 @@ function sanitize(raw: unknown): CustomEndpoint {
 				];
 			})
 		: [];
-	return { baseUrl, models, updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "" };
+	const contextWindows = sanitizeOverrides(record.contextWindows);
+	return {
+		baseUrl,
+		models,
+		// Only models actually present may carry overrides (a stale id from an
+		// older model list must not leak the user).
+		...(Object.keys(contextWindows).length
+			? { contextWindows: Object.fromEntries(Object.entries(contextWindows).filter(([id]) => models.some((m) => m.id === id))) }
+			: {}),
+		updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
+	};
 }
 
 export function readEndpoint(): CustomEndpoint {
@@ -52,6 +62,14 @@ export async function writeEndpoint(record: CustomEndpoint): Promise<void> {
 	await rename(tmp, CUSTOM_ENDPOINT_FILE);
 }
 
+/** Replace the per-model context-window overrides (settings save). */
+export async function saveContextWindows(contextWindows: Record<string, number>): Promise<CustomEndpoint> {
+	const current = readEndpoint();
+	const record: CustomEndpoint = { ...current, contextWindows: sanitizeOverrides(contextWindows), updatedAt: new Date().toISOString() };
+	await writeEndpoint(record);
+	return record;
+}
+
 export async function readEndpointFile(): Promise<CustomEndpoint> {
 	try {
 		return sanitize(JSON.parse(await readFile(CUSTOM_ENDPOINT_FILE, "utf8")));
@@ -66,9 +84,15 @@ export async function readEndpointFile(): Promise<CustomEndpoint> {
 // seam's boot fill-gap uses).
 setCurrentEndpoint(readEndpoint());
 
-/** Store a freshly discovered list (the save path: URL + models together). */
+/**
+ * Store a freshly discovered list (the save path: URL + models together).
+ * Context-window overrides survive a re-connect: re-running discovery is how
+ * the user picks up new models, and it must not wipe settings they typed.
+ */
 export async function saveEndpoint(baseUrl: string, models: CustomModel[]): Promise<CustomEndpoint> {
-	const record: CustomEndpoint = { baseUrl, models, updatedAt: new Date().toISOString() };
+	const keep = readEndpoint().contextWindows ?? {};
+	const contextWindows = Object.fromEntries(Object.entries(keep).filter(([id]) => models.some((m) => m.id === id)));
+	const record: CustomEndpoint = { baseUrl, models, ...(Object.keys(contextWindows).length ? { contextWindows } : {}), updatedAt: new Date().toISOString() };
 	await writeEndpoint(record);
 	return record;
 }

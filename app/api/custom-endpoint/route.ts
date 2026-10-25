@@ -3,25 +3,29 @@
  * endpoint (fork addition): the LLM router / LiteLLM / vLLM / Ollama /
  * gateway every `custom` model runs through.
  *
- * GET   → { baseUrl, models, keyPresent } (never the key itself).
+ * GET → { baseUrl, models, keyPresent, contextWindows } (never the key).
  * PUT   → { baseUrl, apiKey? } — normalizes the URL, DISCOVERS its model
  *         list from GET {base}/models (with the key when given, else the
  *         one already saved), saves url + models + key. A failed discovery
  *         saves NOTHING and reports the endpoint's own error, so a typo
  *         can never leave a half-configured provider behind.
+ * PATCH → { contextWindows } — per-model context-window overrides (fork
+ *          fix). Separate from PUT on purpose: retyping a window must not
+ *          re-run discovery or need the key, and a bad number must fail
+ *          without disturbing the endpoint.
  * DELETE → clears the endpoint and its saved key.
  *
  * The key rides the keys seam under CUSTOM_ENDPOINT_API_KEY, so it is
  * masked in every response and env wins over the file exactly like every
  * other provider key.
  */
-import { CUSTOM_ENDPOINT_KEY_VAR, EMPTY_ENDPOINT, deleteKey, keyValue, modelsUrl, normalizeEndpointUrl, parseModelList, readEndpoint, saveEndpoint, saveKey, writeEndpoint } from "@/src/server";
+import { CUSTOM_ENDPOINT_KEY_VAR, EMPTY_ENDPOINT, MAX_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW, deleteKey, keyValue, modelsUrl, normalizeEndpointUrl, parseModelList, readEndpoint, saveContextWindows, saveEndpoint, saveKey, writeEndpoint } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
 function view() {
 	const record = readEndpoint();
-	return Response.json({ baseUrl: record.baseUrl, models: record.models, keyPresent: keyValue(CUSTOM_ENDPOINT_KEY_VAR) !== undefined });
+	return Response.json({ baseUrl: record.baseUrl, models: record.models, contextWindows: record.contextWindows ?? {}, keyPresent: keyValue(CUSTOM_ENDPOINT_KEY_VAR) !== undefined });
 }
 
 /** Translate a discovery failure into a message the user can act on. */
@@ -69,6 +73,30 @@ export async function PUT(request: Request) {
 	}
 	const record = await saveEndpoint(baseUrl, found.models);
 	return Response.json({ baseUrl: record.baseUrl, models: record.models, keyPresent: true });
+}
+
+export async function PATCH(request: Request) {
+	const body = (await request.json().catch(() => null)) as { contextWindows?: unknown } | null;
+	if (!body || typeof body.contextWindows !== "object" || body.contextWindows === null) return Response.json({ error: "contextWindows is required" }, { status: 400 });
+	const record = readEndpoint();
+	if (!record.baseUrl) return Response.json({ error: "connect an endpoint first" }, { status: 400 });
+	// Validate against the models actually present, so a typo cannot be
+	// stored against a model that is not there.
+	for (const [id, value] of Object.entries(body.contextWindows as Record<string, unknown>)) {
+		if (!record.models.some((m) => m.id === id)) return Response.json({ error: `unknown model: ${id}` }, { status: 400 });
+		if (value === null || value === "" || value === undefined) continue;
+		const window = typeof value === "number" ? value : Number(value);
+		if (!Number.isInteger(window) || window < MIN_CONTEXT_WINDOW || window > MAX_CONTEXT_WINDOW) {
+			return Response.json({ error: `${id}: context window must be a whole number between ${MIN_CONTEXT_WINDOW} and ${MAX_CONTEXT_WINDOW}` }, { status: 400 });
+		}
+	}
+	const cleaned = Object.fromEntries(
+		Object.entries(body.contextWindows as Record<string, unknown>)
+			.filter(([, v]) => v !== null && v !== "" && v !== undefined)
+			.map(([id, v]) => [id, Number(v)]),
+	);
+	const saved = await saveContextWindows(cleaned);
+	return Response.json({ baseUrl: saved.baseUrl, models: saved.models, contextWindows: saved.contextWindows ?? {}, keyPresent: keyValue(CUSTOM_ENDPOINT_KEY_VAR) !== undefined });
 }
 
 export async function DELETE() {

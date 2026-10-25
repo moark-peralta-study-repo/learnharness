@@ -60,11 +60,37 @@ export interface CustomModel {
 	reasoning?: boolean;
 }
 
+/**
+ * The user's context-window OVERRIDE for one model (fork fix). A router that
+ * advertises nothing (/models carries only id/object/created/owned_by) leaves
+ * the app guessing 128k, and some gateways report a wrong number. An override
+ * keyed by model id wins over both the guess and the advertised value, so the
+ * window is adjustable without re-connecting.
+ */
+export type ContextOverrides = Record<string, number>;
+
 /** The stored record. `baseUrl` empty = no endpoint configured. */
 export interface CustomEndpoint {
 	baseUrl: string;
 	models: CustomModel[];
+	/** Per-model context-window overrides (see ContextOverrides). */
+	contextWindows?: ContextOverrides;
 	updatedAt: string;
+}
+
+/** Reasonable override bounds — a context window outside these is a typo. */
+export const MIN_CONTEXT_WINDOW = 1_000;
+export const MAX_CONTEXT_WINDOW = 10_000_000;
+
+/** Keep only well-formed, in-bounds overrides (unknown shapes dropped). */
+export function sanitizeOverrides(raw: unknown): ContextOverrides {
+	if (typeof raw !== "object" || raw === null) return {};
+	const out: ContextOverrides = {};
+	for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+		const window = typeof value === "number" ? value : Number(value);
+		if (id && Number.isInteger(window) && window >= MIN_CONTEXT_WINDOW && window <= MAX_CONTEXT_WINDOW) out[id] = window;
+	}
+	return out;
 }
 
 export const EMPTY_ENDPOINT: CustomEndpoint = { baseUrl: "", models: [], updatedAt: "" };

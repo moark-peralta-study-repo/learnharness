@@ -13,6 +13,7 @@ import {
 	modelsUrl,
 	normalizeEndpointUrl,
 	parseModelList,
+	sanitizeOverrides,
 	setCurrentEndpoint,
 } from "../src/agent/custom-endpoint.ts";
 import { piEngineForSpec, piModels } from "../src/agent/models.ts";
@@ -79,6 +80,20 @@ describe("parseModelList", () => {
 	});
 });
 
+describe("the endpoint store", () => {
+	beforeEach(() => setCurrentEndpoint(EMPTY_ENDPOINT));
+
+	it("saves overrides and drops them for models that are gone", async () => {
+		const store = await import("../src/store/endpoint.ts");
+		await store.saveEndpoint("https://gw.example.com/v1", [{ id: "keep", name: "Keep" }]);
+		await store.saveContextWindows({ keep: 24000, stale: 9000 });
+		assert.deepEqual(store.readEndpoint().contextWindows, { keep: 24000 });
+		// A re-connect (discovery) keeps live overrides but drops orphans.
+		await store.saveEndpoint("https://gw.example.com/v1", [{ id: "keep", name: "Keep" }, { id: "fresh", name: "Fresh" }]);
+		assert.deepEqual(store.readEndpoint().contextWindows, { keep: 24000 });
+	});
+});
+
 describe("customEndpointConfigured", () => {
 	it("needs both a URL and a model", () => {
 		assert.equal(customEndpointConfigured(EMPTY_ENDPOINT), false);
@@ -127,6 +142,33 @@ describe("the provider", () => {
 		// order's first entry (medium) — not off, which used to make the
 		// picker look like it had nothing to offer.
 		assert.equal(engine.level, "medium");
+	});
+
+	it("an unadvertised window gets the placeholder, an advertised one wins", () => {
+		setCurrentEndpoint({ baseUrl: "https://gw.example.com/v1", models: [{ id: "bare", name: "Bare" }, { id: "known", name: "Known", contextWindow: 32000 }], updatedAt: "" });
+		assert.equal(piModels().getModel(CUSTOM_PROVIDER_ID, "bare")!.contextWindow, 128_000);
+		assert.equal(piModels().getModel(CUSTOM_PROVIDER_ID, "known")!.contextWindow, 32000);
+	});
+
+	// Fork fix: the window is user-adjustable — the router advertises nothing,
+	// so 128k was a hard guess. An override wins over both the guess and an
+	// advertised value, and maxTokens follows the effective window.
+	it("the user's context-window override wins over the guess and the advertised value", () => {
+		setCurrentEndpoint({
+			baseUrl: "https://gw.example.com/v1",
+			models: [{ id: "bare", name: "Bare" }, { id: "known", name: "Known", contextWindow: 32000 }],
+			contextWindows: { bare: 12000, known: 64000 },
+			updatedAt: "",
+		});
+		const model = piModels().getModel(CUSTOM_PROVIDER_ID, "bare")!;
+		assert.equal(model.contextWindow, 12000);
+		assert.equal(model.maxTokens, 8192);
+		assert.equal(piModels().getModel(CUSTOM_PROVIDER_ID, "known")!.contextWindow, 64000);
+	});
+
+	it("sanitizeOverrides keeps only whole in-bounds numbers", () => {
+		assert.deepEqual(sanitizeOverrides({ a: 8000, b: 1.5, c: 400, d: 20_000_000, e: "16000" }), { a: 8000, e: 16000 });
+		assert.deepEqual(sanitizeOverrides(null), {});
 	});
 
 	it("an unknown id still throws honestly", () => {

@@ -92,7 +92,11 @@ function customProvider() {
 		baseUrl: endpoint.baseUrl || undefined,
 		auth: { apiKey: envApiKeyAuth(`${CUSTOM_PROVIDER_LABEL} API key`, [CUSTOM_ENDPOINT_KEY_VAR]) },
 		models: endpoint.baseUrl
-			? endpoint.models.map((m) => ({
+			? endpoint.models.map((m) => {
+				// The user's override wins over the advertised window and over
+				// the guess below (see ContextOverrides).
+				const window = endpoint.contextWindows?.[m.id] ?? m.contextWindow;
+				return {
 					id: m.id,
 					name: m.name,
 					api: "openai-completions" as const,
@@ -111,9 +115,10 @@ function customProvider() {
 					// read as a broken model ("auto 0"). The endpoint does not
 					// enforce this number, so a generous default is safe; a
 					// declared window always wins.
-					contextWindow: m.contextWindow ?? UNKNOWN_ENDPOINT_CONTEXT,
-					maxTokens: Math.min(m.contextWindow ?? 8192, 8192),
-				}))
+					contextWindow: window ?? UNKNOWN_ENDPOINT_CONTEXT,
+					maxTokens: Math.min(window ?? 8192, 8192),
+				};
+			})
 			: [],
 		api: openAICompletionsApi(),
 	});

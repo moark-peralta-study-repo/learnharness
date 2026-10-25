@@ -45,5 +45,5 @@ export * from "./observability.ts";
 export * from "./model-catalog.ts";
 // The custom OpenAI-compatible endpoint (fork addition): the store lives in
 // src/store, but app/ routes come through this barrel only.
-export { readEndpoint, saveEndpoint, writeEndpoint } from "../store/endpoint.ts";
-export { CUSTOM_ENDPOINT_KEY_VAR, EMPTY_ENDPOINT, modelsUrl, normalizeEndpointUrl, parseModelList } from "../agent/custom-endpoint.ts";
+export { readEndpoint, saveContextWindows, saveEndpoint, writeEndpoint } from "../store/endpoint.ts";
+export { CUSTOM_ENDPOINT_KEY_VAR, EMPTY_ENDPOINT, MAX_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW, modelsUrl, normalizeEndpointUrl, parseModelList, sanitizeOverrides } from "../agent/custom-endpoint.ts";
