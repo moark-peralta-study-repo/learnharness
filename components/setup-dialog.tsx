@@ -32,7 +32,7 @@
  * CMU title, z-50.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import type React from "react";
@@ -288,43 +288,54 @@ export function SetupDialog({
 		if (section === "keys") setKeysTick((t) => t + 1);
 	});
 
-	// Fresh /api/models per open AND per keys change — a key saved a
-	// moment ago (stage 1's own screen) widens the pickers immediately.
-	useEffect(() => {
-		if (!open) return;
-		let cancelled = false;
-		setBody(null);
+	/** Load the catalog + provider roster and derive the screen from it.
+	 *  Called by the mount/tick effect AND directly by stage 1's save. */
+	const loadCatalog = useCallback(async (cancelled: () => boolean): Promise<void> => {
+		// NOTE: body is NOT blanked here (fork fix). `stage` reads it, and a
+		// null body means "fetch failed" → stage "keys". Blanking on every
+		// keys tick made the dialog SLAM back to the provider picker after a
+		// save, which read as an endless loop even though the save worked.
 		setPicked({});
 		setLevels({});
 		setError(null);
 		fetch("/api/keys")
 			.then((r) => r.json())
-			.then((b: { providers?: ProviderKeyInfo[] }) => { if (!cancelled) setKeyProviders(b.providers ?? []); })
-			.catch(() => { if (!cancelled) setKeyProviders([]); });
-		fetch("/api/models")
-			.then((r) => { if (!r.ok) throw new Error("Catalog unavailable"); return r.json(); })
-			.then((b: ModelsBody) => {
-				if (cancelled) return;
-				setBody(b);
-				setFailed(false);
-				// Prefill (owner, 2026-09-22): each pinned tier opens with its
-				// pick (matched in the FEDERATED catalog — a lapsed key's pin
-				// does not prefill); unpinned tiers stay empty and carry the
-				// "needed" mark. First-run = nothing pinned → all three marked.
-				const pre = prefillFromSlots(b.models, b.slots);
-				setPicked(pre);
-				// Levels prefill with the pins (chunk 2): stored level if still
-				// supported, else the ordering's level for the pinned model.
-				const preLevels: Partial<Record<ModelSlotName, ThinkingLevel>> = {};
-				for (const slot of SLOT_ORDER) {
-					const entry = pre[slot];
-					if (entry) preLevels[slot] = prefillLevelFromPin(entry, b.slots?.[slot]);
-				}
-				setLevels(preLevels);
-			})
-			.catch(() => { if (!cancelled) setFailed(true); });
+			.then((b: { providers?: ProviderKeyInfo[] }) => { if (!cancelled()) setKeyProviders(b.providers ?? []); })
+			.catch(() => { if (!cancelled()) setKeyProviders([]); });
+		try {
+			const res = await fetch("/api/models");
+			if (!res.ok) throw new Error("Catalog unavailable");
+			const b = (await res.json()) as ModelsBody;
+			if (cancelled()) return;
+			setBody(b);
+			setFailed(false);
+			// Prefill (owner, 2026-09-22): each pinned tier opens with its
+			// pick (matched in the FEDERATED catalog — a lapsed key's pin
+			// does not prefill); unpinned tiers stay empty and carry the
+			// "needed" mark. First-run = nothing pinned → all three marked.
+			const pre = prefillFromSlots(b.models, b.slots);
+			setPicked(pre);
+			// Levels prefill with the pins (chunk 2): stored level if still
+			// supported, else the ordering's level for the pinned model.
+			const preLevels: Partial<Record<ModelSlotName, ThinkingLevel>> = {};
+			for (const slot of SLOT_ORDER) {
+				const entry = pre[slot];
+				if (entry) preLevels[slot] = prefillLevelFromPin(entry, b.slots?.[slot]);
+			}
+			setLevels(preLevels);
+		} catch {
+			if (!cancelled()) setFailed(true);
+		}
+	}, []);
+
+	// Fresh /api/models per open AND per keys change — a key saved a
+	// moment ago (stage 1's own screen) widens the pickers immediately.
+	useEffect(() => {
+		if (!open) return;
+		let cancelled = false;
+		void loadCatalog(() => cancelled);
 		return () => { cancelled = true; };
-	}, [open, keysTick]);
+	}, [open, keysTick, loadCatalog]);
 
 	// Esc + outside-click — layered dismissal, closable WITHOUT
 	// configuring (browsing stays possible; the gate is the send
@@ -398,9 +409,17 @@ export function SetupDialog({
 			setKeyError(res ? (body?.error ?? `Save failed (${res.status})`) : "Save failed. Check your connection and try again.");
 			return;
 		}
-		setKeyProvider(null);
 		setKeyValue("");
 		setEndpointUrl("");
+		// The picked provider is NOT cleared: the reload + stage flip follow,
+		// and clearing it painted an empty provider picker for the whole
+		// round-trip, which looked like being asked again.
+		//
+		// RELOAD DIRECTLY (fork fix): the keys signal is not enough here. It
+		// re-runs the effect, whose cleanup cancels that same fetch, so the
+		// dialog sat on stage 1 forever with the save actually applied. The
+		// signal STILL goes out for every other surface (CTA, zero-keys pill).
+		await loadCatalog(() => false);
 		notifySettingsSaved("keys");
 	}
 

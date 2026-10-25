@@ -22,8 +22,25 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 
+/**
+ * Refresh the ChatGPT connection catalog (fork fix: NON-BLOCKING unless a
+ * ChatGPT account is actually connected).
+ *
+ * `refreshChatGPTModels` round-trips the desktop IPC bridge, whose request
+ * timeout is 45 s. With no ChatGPT account that answer changes nothing the
+ * picker needs (chatGPTModels() is already empty), yet the route awaited it
+ * on EVERY /api/models call — a plain `next dev` server took 45-65 s to
+ * answer, so the setup dialog's stage flip looked like a dead save and the
+ * user re-entered the form. Connected: still awaited (a real refresh).
+ * Not connected: fired and forgotten, so the request stays fast.
+ */
 export async function refreshConnectionCatalog(): Promise<void> {
-	await refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses"));
+	const supported = piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses");
+	if (!chatGPTConnected()) {
+		void refreshChatGPTModels(supported);
+		return;
+	}
+	await refreshChatGPTModels(supported);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
 	return provider === "chatgpt" ? chatGPTModel(id) : piModels().getModel(provider, id);
