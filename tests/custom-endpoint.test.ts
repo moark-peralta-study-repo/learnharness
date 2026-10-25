@@ -14,6 +14,7 @@ import {
 	normalizeEndpointUrl,
 	parseModelList,
 	sanitizeOverrides,
+	sanitizeOutputs,
 	setCurrentEndpoint,
 } from "../src/agent/custom-endpoint.ts";
 import { piEngineForSpec, piModels } from "../src/agent/models.ts";
@@ -86,7 +87,7 @@ describe("the endpoint store", () => {
 	it("saves overrides and drops them for models that are gone", async () => {
 		const store = await import("../src/store/endpoint.ts");
 		await store.saveEndpoint("https://gw.example.com/v1", [{ id: "keep", name: "Keep" }]);
-		await store.saveContextWindows({ keep: 24000, stale: 9000 });
+		await store.saveOverrides({ contextWindows: { keep: 24000, stale: 9000 } });
 		assert.deepEqual(store.readEndpoint().contextWindows, { keep: 24000 });
 		// A re-connect (discovery) keeps live overrides but drops orphans.
 		await store.saveEndpoint("https://gw.example.com/v1", [{ id: "keep", name: "Keep" }, { id: "fresh", name: "Fresh" }]);
@@ -164,6 +165,20 @@ describe("the provider", () => {
 		assert.equal(model.contextWindow, 12000);
 		assert.equal(model.maxTokens, 8192);
 		assert.equal(piModels().getModel(CUSTOM_PROVIDER_ID, "known")!.contextWindow, 64000);
+	});
+
+	// Fork fix: the 8192 reply cap is now a per-model field. 0 means NO LIMIT —
+	// pi omits a falsy maxTokens, so the server and model decide the ceiling.
+	it("a reply cap overrides the derived default and 0 means no limit", () => {
+		setCurrentEndpoint({ baseUrl: "https://gw.example.com/v1", models: [{ id: "a", name: "A" }], maxOutputs: { a: 0 }, updatedAt: "" });
+		assert.equal(piModels().getModel(CUSTOM_PROVIDER_ID, "a")!.maxTokens, 0);
+		setCurrentEndpoint({ baseUrl: "https://gw.example.com/v1", models: [{ id: "a", name: "A" }], maxOutputs: { a: 32000 }, updatedAt: "" });
+		assert.equal(piModels().getModel(CUSTOM_PROVIDER_ID, "a")!.maxTokens, 32000);
+	});
+
+	it("sanitizeOutputs allows 0 and keeps only sane whole numbers", () => {
+		assert.deepEqual(sanitizeOutputs({ a: 0, b: 4096, c: -1, d: 1.5, e: "2048" }), { a: 0, b: 4096, e: 2048 });
+		assert.deepEqual(sanitizeOutputs(null), {});
 	});
 
 	it("sanitizeOverrides keeps only whole in-bounds numbers", () => {

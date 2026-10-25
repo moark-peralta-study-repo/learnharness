@@ -19,6 +19,7 @@ interface EndpointView {
 	baseUrl: string;
 	models: { id: string; name: string }[];
 	contextWindows: Record<string, number>;
+	maxOutputs: Record<string, number>;
 	keyPresent: boolean;
 }
 
@@ -34,6 +35,7 @@ export function CustomEndpointSection() {
 	/** Draft per-model windows: a string while typing, so the field can be
 	 *  emptied; saved as numbers. */
 	const [windows, setWindows] = useState<Record<string, string>>({});
+	const [outputs, setOutputs] = useState<Record<string, string>>({});
 	const [windowError, setWindowError] = useState<string | null>(null);
 	const [windowSaved, setWindowSaved] = useState<string | null>(null);
 
@@ -45,6 +47,7 @@ export function CustomEndpointSection() {
 				setView(b);
 				setUrl((current) => current || b.baseUrl);
 				setWindows(Object.fromEntries(b.models.map((m) => [m.id, b.contextWindows?.[m.id] ? String(b.contextWindows[m.id]) : ""])));
+				setOutputs(Object.fromEntries(b.models.map((m) => [m.id, b.maxOutputs?.[m.id] !== undefined ? String(b.maxOutputs[m.id]) : ""])));
 			})
 			.catch(() => undefined);
 	}, []);
@@ -75,21 +78,19 @@ export function CustomEndpointSection() {
 		}
 	}
 
-	/** Save ONE model's window (PATCH never re-runs discovery). */
-	async function saveWindow(id: string) {
+	/** Save ONE model's row — window and reply cap together (PATCH never
+	 *  re-runs discovery). Blank clears; a 0 cap means no limit. */
+	async function saveRow(id: string) {
 		setWindowError(null);
 		setWindowSaved(null);
-		const raw = windows[id] ?? "";
-		const contextWindows: Record<string, number | null> = {
-			// Merge the rest in so saving one row cannot clear the others.
-			...Object.fromEntries(Object.entries(windows).map(([k, v]) => [k, v.trim() ? Number(v) : null])),
-			[id]: raw.trim() ? Number(raw) : null,
-		};
+		// Merge the rest in so saving one row cannot clear the others.
+		const map = (draft: Record<string, string>) =>
+			Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, v.trim() ? Number(v) : null]));
 		try {
 			const res = await fetch("/api/custom-endpoint", {
 				method: "PATCH",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ contextWindows }),
+				body: JSON.stringify({ contextWindows: map(windows), maxOutputs: map(outputs) }),
 			});
 			const body = (await res.json().catch(() => ({}))) as { error?: string };
 			if (!res.ok) {
@@ -178,19 +179,34 @@ export function CustomEndpointSection() {
 							<div key={model.id} className="flex items-center gap-2">
 								<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{model.name}</span>
 								<input
-									className={`${INPUT} w-32`}
+									className={`${INPUT} w-28`}
 									data-testid={`custom-endpoint-window-${model.id}`}
 									inputMode="numeric"
+									aria-label={`${model.name} context window`}
 									value={windows[model.id] ?? ""}
 									onChange={(e) => setWindows((prev) => ({ ...prev, [model.id]: e.target.value.replace(/[^0-9]/g, "") }))}
 									placeholder="128000"
 									disabled={busy}
 								/>
+								<input
+									className={`${INPUT} w-24`}
+									data-testid={`custom-endpoint-output-${model.id}`}
+									inputMode="numeric"
+									aria-label={`${model.name} reply cap`}
+									value={outputs[model.id] ?? ""}
+									onChange={(e) => setOutputs((prev) => ({ ...prev, [model.id]: e.target.value.replace(/[^0-9]/g, "") }))}
+									placeholder="8192"
+									disabled={busy}
+								/>
 								<button
 									type="button"
 									data-testid={`custom-endpoint-window-save-${model.id}`}
-									onClick={() => void saveWindow(model.id)}
-									disabled={busy || (windows[model.id] ?? "") === String(view!.contextWindows?.[model.id] ?? "")}
+									onClick={() => void saveRow(model.id)}
+									disabled={
+										busy ||
+										((windows[model.id] ?? "") === String(view!.contextWindows?.[model.id] ?? "") &&
+											(outputs[model.id] ?? "") === String(view!.maxOutputs?.[model.id] ?? ""))
+									}
 									className="rounded border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-40"
 								>
 									Save
@@ -198,6 +214,9 @@ export function CustomEndpointSection() {
 								{windowSaved === model.id && <span className="text-xs text-muted-foreground">Saved</span>}
 							</div>
 						))}
+						<span className="text-xs text-muted-foreground">
+							Second box is the reply cap (<span className="font-mono">max_tokens</span>) — leave blank for the default (window-bounded, 8192), or <span className="font-mono">0</span> for no limit.
+						</span>
 						{windowError && (
 							<p data-testid="custom-endpoint-window-error" className="text-xs text-red-500">
 								{windowError}

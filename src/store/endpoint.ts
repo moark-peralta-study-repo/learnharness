@@ -9,7 +9,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { CUSTOM_ENDPOINT_FILE, EMPTY_ENDPOINT, sanitizeOverrides, setCurrentEndpoint, type CustomEndpoint, type CustomModel } from "../agent/custom-endpoint.ts";
+import { CUSTOM_ENDPOINT_FILE, EMPTY_ENDPOINT, sanitizeOverrides, sanitizeOutputs, setCurrentEndpoint, type CustomEndpoint, type CustomModel } from "../agent/custom-endpoint.ts";
 
 function sanitize(raw: unknown): CustomEndpoint {
 	if (typeof raw !== "object" || raw === null) return EMPTY_ENDPOINT;
@@ -32,14 +32,15 @@ function sanitize(raw: unknown): CustomEndpoint {
 			})
 		: [];
 	const contextWindows = sanitizeOverrides(record.contextWindows);
+	const maxOutputs = sanitizeOutputs(record.maxOutputs);
+	// Only models actually present may carry overrides (a stale id from an
+	// older model list must not leak the user).
+	const live = <T>(map: Record<string, T>) => Object.fromEntries(Object.entries(map).filter(([id]) => models.some((m) => m.id === id)));
 	return {
 		baseUrl,
 		models,
-		// Only models actually present may carry overrides (a stale id from an
-		// older model list must not leak the user).
-		...(Object.keys(contextWindows).length
-			? { contextWindows: Object.fromEntries(Object.entries(contextWindows).filter(([id]) => models.some((m) => m.id === id))) }
-			: {}),
+		...(Object.keys(contextWindows).length ? { contextWindows: live(contextWindows) } : {}),
+		...(Object.keys(maxOutputs).length ? { maxOutputs: live(maxOutputs) } : {}),
 		updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
 	};
 }
@@ -62,10 +63,12 @@ export async function writeEndpoint(record: CustomEndpoint): Promise<void> {
 	await rename(tmp, CUSTOM_ENDPOINT_FILE);
 }
 
-/** Replace the per-model context-window overrides (settings save). */
-export async function saveContextWindows(contextWindows: Record<string, number>): Promise<CustomEndpoint> {
+/** Replace the per-model overrides — windows and reply caps (settings save). */
+export async function saveOverrides(overrides: { contextWindows?: Record<string, number>; maxOutputs?: Record<string, number> }): Promise<CustomEndpoint> {
 	const current = readEndpoint();
-	const record: CustomEndpoint = { ...current, contextWindows: sanitizeOverrides(contextWindows), updatedAt: new Date().toISOString() };
+	const contextWindows = overrides.contextWindows === undefined ? current.contextWindows : sanitizeOverrides(overrides.contextWindows);
+	const maxOutputs = overrides.maxOutputs === undefined ? current.maxOutputs : sanitizeOutputs(overrides.maxOutputs);
+	const record: CustomEndpoint = { ...current, ...(contextWindows ? { contextWindows } : {}), ...(maxOutputs ? { maxOutputs } : {}), updatedAt: new Date().toISOString() };
 	await writeEndpoint(record);
 	return record;
 }
@@ -90,9 +93,17 @@ setCurrentEndpoint(readEndpoint());
  * the user picks up new models, and it must not wipe settings they typed.
  */
 export async function saveEndpoint(baseUrl: string, models: CustomModel[]): Promise<CustomEndpoint> {
-	const keep = readEndpoint().contextWindows ?? {};
-	const contextWindows = Object.fromEntries(Object.entries(keep).filter(([id]) => models.some((m) => m.id === id)));
-	const record: CustomEndpoint = { baseUrl, models, ...(Object.keys(contextWindows).length ? { contextWindows } : {}), updatedAt: new Date().toISOString() };
+	const previous = readEndpoint();
+	const live = <T>(map: Record<string, T>) => Object.fromEntries(Object.entries(map).filter(([id]) => models.some((m) => m.id === id)));
+	const contextWindows = live(previous.contextWindows ?? {});
+	const maxOutputs = live(previous.maxOutputs ?? {});
+	const record: CustomEndpoint = {
+		baseUrl,
+		models,
+		...(Object.keys(contextWindows).length ? { contextWindows } : {}),
+		...(Object.keys(maxOutputs).length ? { maxOutputs } : {}),
+		updatedAt: new Date().toISOString(),
+	};
 	await writeEndpoint(record);
 	return record;
 }

@@ -9,23 +9,25 @@
  *         one already saved), saves url + models + key. A failed discovery
  *         saves NOTHING and reports the endpoint's own error, so a typo
  *         can never leave a half-configured provider behind.
- * PATCH → { contextWindows } — per-model context-window overrides (fork
- *          fix). Separate from PUT on purpose: retyping a window must not
- *          re-run discovery or need the key, and a bad number must fail
- *          without disturbing the endpoint.
+ * PATCH → { contextWindows?, maxOutputs? } — per-model window and reply-cap
+ *          overrides (fork fix). Separate from PUT on purpose: retyping a
+ *          number must not re-run discovery or need the key, and a bad value
+ *          must fail without disturbing the endpoint. A maxOutput of 0 means
+ *          NO LIMIT (the field is left off the request); blank clears an
+ *          override.
  * DELETE → clears the endpoint and its saved key.
  *
  * The key rides the keys seam under CUSTOM_ENDPOINT_API_KEY, so it is
  * masked in every response and env wins over the file exactly like every
  * other provider key.
  */
-import { CUSTOM_ENDPOINT_KEY_VAR, EMPTY_ENDPOINT, MAX_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW, deleteKey, keyValue, modelsUrl, normalizeEndpointUrl, parseModelList, readEndpoint, saveContextWindows, saveEndpoint, saveKey, writeEndpoint } from "@/src/server";
+import { CUSTOM_ENDPOINT_KEY_VAR, EMPTY_ENDPOINT, MAX_CONTEXT_WINDOW, MAX_OUTPUT_TOKENS, MIN_CONTEXT_WINDOW, deleteKey, keyValue, modelsUrl, normalizeEndpointUrl, parseModelList, readEndpoint, saveEndpoint, saveOverrides, saveKey, writeEndpoint } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
 function view() {
 	const record = readEndpoint();
-	return Response.json({ baseUrl: record.baseUrl, models: record.models, contextWindows: record.contextWindows ?? {}, keyPresent: keyValue(CUSTOM_ENDPOINT_KEY_VAR) !== undefined });
+	return Response.json({ baseUrl: record.baseUrl, models: record.models, contextWindows: record.contextWindows ?? {}, maxOutputs: record.maxOutputs ?? {}, keyPresent: keyValue(CUSTOM_ENDPOINT_KEY_VAR) !== undefined });
 }
 
 /** Translate a discovery failure into a message the user can act on. */
@@ -76,27 +78,37 @@ export async function PUT(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-	const body = (await request.json().catch(() => null)) as { contextWindows?: unknown } | null;
-	if (!body || typeof body.contextWindows !== "object" || body.contextWindows === null) return Response.json({ error: "contextWindows is required" }, { status: 400 });
+	const body = (await request.json().catch(() => null)) as { contextWindows?: unknown; maxOutputs?: unknown } | null;
+	const isMap = (v: unknown) => typeof v === "object" && v !== null;
+	if (!body || (!isMap(body.contextWindows) && !isMap(body.maxOutputs))) return Response.json({ error: "contextWindows or maxOutputs is required" }, { status: 400 });
 	const record = readEndpoint();
 	if (!record.baseUrl) return Response.json({ error: "connect an endpoint first" }, { status: 400 });
 	// Validate against the models actually present, so a typo cannot be
-	// stored against a model that is not there.
-	for (const [id, value] of Object.entries(body.contextWindows as Record<string, unknown>)) {
-		if (!record.models.some((m) => m.id === id)) return Response.json({ error: `unknown model: ${id}` }, { status: 400 });
-		if (value === null || value === "" || value === undefined) continue;
-		const window = typeof value === "number" ? value : Number(value);
-		if (!Number.isInteger(window) || window < MIN_CONTEXT_WINDOW || window > MAX_CONTEXT_WINDOW) {
-			return Response.json({ error: `${id}: context window must be a whole number between ${MIN_CONTEXT_WINDOW} and ${MAX_CONTEXT_WINDOW}` }, { status: 400 });
+	// stored against a model that is not there. Blank clears an override.
+	const parse = (map: unknown, label: string, min: number, max: number): { values: Record<string, number> } | { error: string } => {
+		const values: Record<string, number> = {};
+		for (const [id, value] of Object.entries(map as Record<string, unknown>)) {
+			if (!record.models.some((m) => m.id === id)) return { error: `unknown model: ${id}` };
+			if (value === null || value === "" || value === undefined) continue;
+			const n = typeof value === "number" ? value : Number(value);
+			if (!Number.isInteger(n) || n < min || n > max) return { error: `${id}: ${label} must be a whole number between ${min} and ${max}` };
+			values[id] = n;
 		}
+		return { values };
+	};
+	const overrides: { contextWindows?: Record<string, number>; maxOutputs?: Record<string, number> } = {};
+	if (isMap(body.contextWindows)) {
+		const parsed = parse(body.contextWindows, "context window", MIN_CONTEXT_WINDOW, MAX_CONTEXT_WINDOW);
+		if ("error" in parsed) return Response.json({ error: parsed.error }, { status: 400 });
+		overrides.contextWindows = parsed.values;
 	}
-	const cleaned = Object.fromEntries(
-		Object.entries(body.contextWindows as Record<string, unknown>)
-			.filter(([, v]) => v !== null && v !== "" && v !== undefined)
-			.map(([id, v]) => [id, Number(v)]),
-	);
-	const saved = await saveContextWindows(cleaned);
-	return Response.json({ baseUrl: saved.baseUrl, models: saved.models, contextWindows: saved.contextWindows ?? {}, keyPresent: keyValue(CUSTOM_ENDPOINT_KEY_VAR) !== undefined });
+	if (isMap(body.maxOutputs)) {
+		const parsed = parse(body.maxOutputs, "reply cap (0 = no limit)", 0, MAX_OUTPUT_TOKENS);
+		if ("error" in parsed) return Response.json({ error: parsed.error }, { status: 400 });
+		overrides.maxOutputs = parsed.values;
+	}
+	const saved = await saveOverrides(overrides);
+	return Response.json({ baseUrl: saved.baseUrl, models: saved.models, contextWindows: saved.contextWindows ?? {}, maxOutputs: saved.maxOutputs ?? {}, keyPresent: keyValue(CUSTOM_ENDPOINT_KEY_VAR) !== undefined });
 }
 
 export async function DELETE() {

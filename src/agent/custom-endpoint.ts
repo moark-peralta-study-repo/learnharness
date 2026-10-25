@@ -75,7 +75,32 @@ export interface CustomEndpoint {
 	models: CustomModel[];
 	/** Per-model context-window overrides (see ContextOverrides). */
 	contextWindows?: ContextOverrides;
+	/** Per-model reply caps (see OutputOverrides); 0 = no limit. */
+	maxOutputs?: OutputOverrides;
 	updatedAt: string;
+}
+
+/**
+ * Per-model REPLY cap (`max_tokens`), the sibling of ContextOverrides: 0 means
+ * NO LIMIT and omits the field from the request entirely (pi's completions
+ * adapter skips a falsy maxTokens via `if (options?.maxTokens)`), leaving the
+ * ceiling to the server and the model. Unset falls back to the old derived
+ * cap, so an untouched install behaves as before.
+ */
+export type OutputOverrides = Record<string, number>;
+
+/** A reply cap above this is a typo — the ceiling is the window anyway. */
+export const MAX_OUTPUT_TOKENS = 2_000_000;
+
+/** Keep only well-formed caps; 0 is legal and means no limit. */
+export function sanitizeOutputs(raw: unknown): OutputOverrides {
+	if (typeof raw !== "object" || raw === null) return {};
+	const out: OutputOverrides = {};
+	for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+		const cap = typeof value === "number" ? value : Number(value);
+		if (id && Number.isInteger(cap) && cap >= 0 && cap <= MAX_OUTPUT_TOKENS) out[id] = cap;
+	}
+	return out;
 }
 
 /** Reasonable override bounds — a context window outside these is a typo. */

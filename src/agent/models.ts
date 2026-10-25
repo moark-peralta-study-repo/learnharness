@@ -96,6 +96,10 @@ function customProvider() {
 				// The user's override wins over the advertised window and over
 				// the guess below (see ContextOverrides).
 				const window = endpoint.contextWindows?.[m.id] ?? m.contextWindow;
+				// Reply cap: an explicit 0 means NO LIMIT — pi omits a falsy
+				// maxTokens, so the server and model decide. Unset keeps the
+				// derived cap (window-bounded, 8192).
+				const cap = endpoint.maxOutputs?.[m.id];
 				return {
 					id: m.id,
 					name: m.name,
@@ -116,7 +120,7 @@ function customProvider() {
 					// enforce this number, so a generous default is safe; a
 					// declared window always wins.
 					contextWindow: window ?? UNKNOWN_ENDPOINT_CONTEXT,
-					maxTokens: Math.min(window ?? 8192, 8192),
+					maxTokens: cap ?? Math.min(window ?? 8192, 8192),
 				};
 			})
 			: [],
