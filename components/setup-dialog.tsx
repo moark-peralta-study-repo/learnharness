@@ -405,19 +405,25 @@ export function SetupDialog({
 		// URL + key together, which VERIFIES the endpoint and federates its
 		// models. A bare key here would leave the provider empty and the
 		// flow would bounce straight back to this stage.
-		const res = await fetch(isCustom ? "/api/custom-endpoint" : `/api/keys/${encodeURIComponent(keyProvider.envVar)}`, {
-			method: "PUT",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(isCustom ? { baseUrl: endpointUrl, apiKey: keyValue } : { value: keyValue }),
-		}).catch(() => null);
-		setKeySaving(false);
+		let res: Response | null = null;
+		try {
+			res = await fetch(isCustom ? "/api/custom-endpoint" : `/api/keys/${encodeURIComponent(keyProvider.envVar)}`, {
+				method: "PUT",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(isCustom ? { baseUrl: endpointUrl, apiKey: keyValue } : { value: keyValue }),
+			});
+		} catch {
+			res = null;
+		}
+		// Never leave the spinner latched (fork fix): `keySaving` gates its own
+		// retry, so one thrown request used to wedge the form in "Connecting…"
+		// with no way back.
 		if (!res || !res.ok) {
+			setKeySaving(false);
 			const body = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
 			setKeyError(res ? (body?.error ?? `Save failed (${res.status})`) : "Save failed. Check your connection and try again.");
 			return;
 		}
-		setKeyValue("");
-		setEndpointUrl("");
 		// The picked provider is NOT cleared: the reload + stage flip follow,
 		// and clearing it painted an empty provider picker for the whole
 		// round-trip, which looked like being asked again.
@@ -426,7 +432,19 @@ export function SetupDialog({
 		// re-runs the effect, whose cleanup cancels that same fetch, so the
 		// dialog sat on stage 1 forever with the save actually applied. The
 		// signal STILL goes out for every other surface (CTA, zero-keys pill).
-		await loadCatalog(() => false);
+		// Locally FIRST, notify LAST (fork fix): the signal re-renders the shell
+		// around this dialog, and doing it before the reset painted a wiped form
+		// for the whole round-trip. The catalog load gets its own guard so a
+		// throw cannot leave the form disabled forever.
+		setKeyValue("");
+		setEndpointUrl("");
+		try {
+			await loadCatalog(() => false);
+		} catch {
+			setKeyError("Saved, but the model list did not load. Close and reopen this dialog.");
+		} finally {
+			setKeySaving(false);
+		}
 		notifySettingsSaved("keys");
 	}
 

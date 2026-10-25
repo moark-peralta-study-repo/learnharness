@@ -303,6 +303,10 @@ export function AgentSection({
 	onCompactionChange: (next: CompactionSettings) => void;
 }) {
 	const [catalog, setCatalog] = useState<ModelCatalogEntry[] | null>(null);
+	/** Catalog fetch failure (fork fix). `catalog === null` means "not loaded
+	 *  yet" to every consumer, so a REJECTED fetch that also set null rendered
+	 *  "Loading models…" forever with no error and no way out. */
+	const [catalogFailed, setCatalogFailed] = useState(false);
 	/** The three tiers' resolved pins — GET /api/models `slots`. The rows'
 	 *  Default hints and thinking lists resolve from it. */
 	const [slots, setSlots] = useState<ModelsBody["slots"] | null>(null);
@@ -356,8 +360,13 @@ export function AgentSection({
 				if (!modelsMounted.current || request !== modelsRequest.current) return;
 				setCatalog(body.models);
 				setSlots(body.slots);
+				setCatalogFailed(false);
 			})
-			.catch(() => { if (modelsMounted.current && request === modelsRequest.current) setCatalog(null); });
+			.catch(() => {
+				if (!modelsMounted.current || request !== modelsRequest.current) return;
+				setCatalog(null);
+				setCatalogFailed(true);
+			});
 	}, []);
 
 	useSettingsSaved((section) => {
@@ -679,6 +688,8 @@ export function AgentSection({
 									>
 										<ModelMenuList
 											models={slotCatalog ?? undefined}
+										failed={catalogFailed}
+										onRetry={() => readModels(true)}
 											effectiveId={modelId}
 											effectiveProvider={provider}
 											onPick={(entry) => {

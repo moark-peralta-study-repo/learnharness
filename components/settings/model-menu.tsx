@@ -38,9 +38,17 @@ export function ModelMenuList({
 	effectiveProvider,
 	onPick,
 	footer,
+	failed,
+	onRetry,
 }: {
 	/** The full catalog — undefined while it loads. */
 	models: ModelCatalogEntry[] | undefined;
+	/** The catalog fetch FAILED (fork fix): without this the menu shows
+	 *  "Loading models…" forever, because undefined means "still loading"
+	 *  and a failure used to land on the same value. */
+	failed?: boolean;
+	/** Retry the catalog read (rendered as a button in the failed state). */
+	onRetry?: () => void;
 	/** Currently effective id (the row gets the quiet highlight). */
 	effectiveId: string | undefined;
 	/** The effective id's provider (model-slots wave: the catalog
@@ -107,7 +115,17 @@ export function ModelMenuList({
 				placeholder="Search models…"
 				className="lh-input mb-1.5 w-full rounded-lg border bg-background px-2 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-ring"
 			/>
-			{!models && <div className="px-2 py-3 text-center text-muted-foreground">Loading models…</div>}
+			{!models && !failed && <div className="px-2 py-3 text-center text-muted-foreground">Loading models…</div>}
+			{!models && failed && (
+				<div className="flex flex-col items-center gap-1.5 px-2 py-3 text-center text-muted-foreground">
+					<span>Couldn’t load models.</span>
+					{onRetry && (
+						<button type="button" data-testid="model-menu-retry" onClick={onRetry} className="rounded border border-border px-2 py-0.5 text-xs hover:bg-foreground/5">
+							Retry
+						</button>
+					)}
+				</div>
+			)}
 			{models && results.length === 0 && (
 				<div className="px-2 py-3 text-center text-muted-foreground">No models match.</div>
 			)}
