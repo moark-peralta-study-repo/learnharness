@@ -461,7 +461,20 @@ function installUpdateNow() {
 	autoUpdater?.quitAndInstall();
 }
 
+/**
+ * FORK: the bundled updater points at the UPSTREAM repo, so it happily
+ * replaces a fork build with an upstream release and every fork fix
+ * disappears. Disabled here so the app is what you built; re-enable by
+ * deleting this flag file (and pointing electron-builder.yml's publish
+ * block at the fork) when fork releases start getting published.
+ */
+const UPDATER_DISABLED = true;
+
 function setupAutoUpdater() {
+	if (UPDATER_DISABLED) {
+		log("auto-update: disabled (fork build — the feed points at upstream)");
+		return;
+	}
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
 		return;

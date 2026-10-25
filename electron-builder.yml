@@ -179,6 +179,10 @@ publish:
   # from a private repo are impossible, and a token baked into the app
   # would be a leak. desktop:dist passes no --publish flag, so builds never
   # upload; publishing happens at release time (GH_TOKEN + --publish).
+  # FORK: the shell's updater is disabled (electron/main.cjs UPDATER_DISABLED)
+  # because this feed is upstream's — a fork build would be replaced by an
+  # upstream release and lose every fork fix. Repoint at the fork when its own
+  # releases are published, then delete that flag.
   - provider: github
     owner: amosblomqvist
     repo: learnharness
